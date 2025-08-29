@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cartographer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        select {
+            padding: 8px 15px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+        }
+
+        #map {
+            flex: 1;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+        }
+
+        .info-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+            z-index: 1000;
+            max-width: 300px;
+        }
+
+        .info-panel h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .info-panel p {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .coordinates {
+            font-family: monospace;
+            background: #f5f5f5;
+            padding: 5px 10px;
+            border-radius: 3px;
+            margin-top: 10px;
+            font-size: 12px;
+        }
+
+        .marker-popup {
+            font-size: 14px;
+        }
+
+        .marker-popup h4 {
+            margin-bottom: 5px;
+            color: #333;
+        }
+
+        .marker-popup p {
+            color: #666;
+            margin: 3px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🗺️ Cartographer</h1>
+        <div class="controls">
+            <div class="control-group">
+                <button onclick="goToLocation('newyork')">📍 New York</button>
+                <button onclick="goToLocation('london')">📍 London</button>
+                <button onclick="goToLocation('tokyo')">📍 Tokyo</button>
+                <button onclick="goToLocation('paris')">📍 Paris</button>
+            </div>
+            <div class="control-group">
+                <label for="mapStyle">Map Style:</label>
+                <select id="mapStyle" onchange="changeMapStyle(this.value)">
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="topo">Topographic</option>
+                    <option value="dark">Dark Mode</option>
+                    <option value="watercolor">Watercolor</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <button onclick="addRandomMarker()">📌 Add Marker</button>
+                <button onclick="clearMarkers()">🗑️ Clear Markers</button>
+                <button onclick="drawRoute()">🛤️ Draw Route</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="info-panel">
+        <h3>Map Information</h3>
+        <p>Click on the map to place custom markers. Use the controls above to navigate to different cities or change the map style.</p>
+        <div class="coordinates" id="coordinates">
+            Lat: 40.7128, Lng: -74.0060
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let map;
+        let markers = [];
+        let currentTileLayer;
+        let routeLine;
+
+        const tileLayers = {
+            osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            topo: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+            dark: 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png',
+            watercolor: 'https://stamen-tiles-{s}.a.ssl.fastly.net/watercolor/{z}/{x}/{y}.jpg'
+        };
+
+        const locations = {
+            newyork: { lat: 40.7128, lng: -74.0060, name: 'New York City' },
+            london: { lat: 51.5074, lng: -0.1278, name: 'London' },
+            tokyo: { lat: 35.6762, lng: 139.6503, name: 'Tokyo' },
+            paris: { lat: 48.8566, lng: 2.3522, name: 'Paris' }
+        };
+
+        function initMap() {
+            map = L.map('map').setView([40.7128, -74.0060], 11);
+
+            currentTileLayer = L.tileLayer(tileLayers.osm, {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(map);
+
+            map.on('click', onMapClick);
+            map.on('mousemove', updateCoordinates);
+
+            L.marker([40.7128, -74.0060])
+                .addTo(map)
+                .bindPopup('<div class="marker-popup"><h4>Welcome to Cartographer!</h4><p>Your interactive mapping application</p><p>No location permissions required!</p></div>')
+                .openPopup();
+        }
+
+        function onMapClick(e) {
+            const marker = L.marker(e.latlng)
+                .addTo(map)
+                .bindPopup(`<div class="marker-popup"><h4>Custom Marker</h4><p>Latitude: ${e.latlng.lat.toFixed(4)}</p><p>Longitude: ${e.latlng.lng.toFixed(4)}</p></div>`);
+            
+            markers.push(marker);
+        }
+
+        function updateCoordinates(e) {
+            document.getElementById('coordinates').textContent = 
+                `Lat: ${e.latlng.lat.toFixed(4)}, Lng: ${e.latlng.lng.toFixed(4)}`;
+        }
+
+        function goToLocation(locationKey) {
+            const location = locations[locationKey];
+            map.setView([location.lat, location.lng], 12);
+            
+            L.marker([location.lat, location.lng])
+                .addTo(map)
+                .bindPopup(`<div class="marker-popup"><h4>${location.name}</h4><p>Latitude: ${location.lat}</p><p>Longitude: ${location.lng}</p></div>`)
+                .openPopup();
+        }
+
+        function changeMapStyle(style) {
+            if (currentTileLayer) {
+                map.removeLayer(currentTileLayer);
+            }
+            
+            currentTileLayer = L.tileLayer(tileLayers[style], {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(map);
+        }
+
+        function addRandomMarker() {
+            const bounds = map.getBounds();
+            const lat = bounds.getSouth() + (bounds.getNorth() - bounds.getSouth()) * Math.random();
+            const lng = bounds.getWest() + (bounds.getEast() - bounds.getWest()) * Math.random();
+            
+            const marker = L.marker([lat, lng])
+                .addTo(map)
+                .bindPopup(`<div class="marker-popup"><h4>Random Marker</h4><p>Latitude: ${lat.toFixed(4)}</p><p>Longitude: ${lng.toFixed(4)}</p></div>`);
+            
+            markers.push(marker);
+        }
+
+        function clearMarkers() {
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+            if (routeLine) {
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }
+        }
+
+        function drawRoute() {
+            if (routeLine) {
+                map.removeLayer(routeLine);
+            }
+
+            const points = [
+                [40.7128, -74.0060],
+                [40.7580, -73.9855],
+                [40.7489, -73.9680],
+                [40.7614, -73.9776]
+            ];
+
+            routeLine = L.polyline(points, {
+                color: '#667eea',
+                weight: 5,
+                opacity: 0.7,
+                smoothFactor: 1
+            }).addTo(map);
+
+            points.forEach((point, index) => {
+                L.marker(point)
+                    .addTo(map)
+                    .bindPopup(`<div class="marker-popup"><h4>Route Point ${index + 1}</h4><p>Latitude: ${point[0]}</p><p>Longitude: ${point[1]}</p></div>`);
+                markers.push(L.marker(point));
+            });
+
+            map.fitBounds(routeLine.getBounds());
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>

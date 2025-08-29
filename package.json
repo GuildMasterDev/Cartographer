@@ -1,0 +1,16 @@
+{
+  "name": "cartographer",
+  "version": "1.0.0",
+  "description": "Cartographer - Interactive mapping application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["electron", "openstreetmap", "maps"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^32.0.0"
+  }
+}
