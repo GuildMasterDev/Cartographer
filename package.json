@@ -1,6 +1,6 @@
 {
   "name": "cartographer",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Cartographer - Interactive mapping application",
   "main": "main.js",
   "scripts": {
