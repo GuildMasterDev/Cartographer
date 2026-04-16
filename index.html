@@ -170,23 +170,106 @@
             bottom: 20px;
             left: 20px;
             background: rgba(255, 255, 255, 0.95);
-            padding: 15px;
+            padding: 15px 18px;
             border-radius: 10px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.15);
             z-index: 1000;
-            max-width: 300px;
+            max-width: 320px;
+            transition: max-width 0.2s ease, padding 0.2s ease;
+        }
+
+        .info-panel.collapsed {
+            max-width: 56px;
+            padding: 10px 14px;
+        }
+
+        .info-panel.collapsed .info-body {
+            display: none;
         }
 
         .info-panel h3 {
             color: #333;
-            margin-bottom: 10px;
-            font-size: 16px;
+            margin: 0;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .info-panel h3 .toggle {
+            color: #999;
+            font-size: 12px;
+            margin-left: 12px;
+            transition: transform 0.2s ease;
+        }
+
+        .info-panel.collapsed h3 .toggle {
+            transform: rotate(180deg);
+        }
+
+        .info-body {
+            margin-top: 10px;
         }
 
         .info-panel p {
             color: #666;
-            font-size: 14px;
+            font-size: 13px;
             line-height: 1.5;
+        }
+
+        .keyboard-hint {
+            color: #999;
+            font-size: 11px;
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        .keyboard-hint kbd {
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            padding: 1px 5px;
+            font-size: 10px;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            color: #444;
+        }
+
+        .marker-mode-off #map {
+            cursor: grab;
+        }
+
+        .marker-mode-off #map:active {
+            cursor: grabbing;
+        }
+
+        @media (max-width: 820px) {
+            .header {
+                padding: 14px;
+            }
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+            }
+            .control-group {
+                flex-wrap: wrap;
+                justify-content: flex-start;
+            }
+            .search-wrap {
+                max-width: none;
+            }
+            .info-panel {
+                left: 10px;
+                right: 10px;
+                bottom: 10px;
+                max-width: none;
+            }
+            .info-panel.collapsed {
+                right: auto;
+                max-width: 56px;
+            }
         }
 
         .coordinates {
@@ -297,14 +380,22 @@
     <div id="map"></div>
 
     <div class="info-panel" id="infoPanel">
-        <h3>Map Information</h3>
-        <p>Search for a place, or click the map to drop a marker. Markers persist across restarts and can be exported or imported as GeoJSON.</p>
-        <div class="coordinates" id="coordinates">
-            Lat: 40.7128, Lng: -74.0060
-        </div>
-        <div class="route-info" id="routeInfo" hidden>
-            <strong>Route:</strong> <span id="routeDistance">0 km</span>
-            <span class="muted" id="routeStops"></span>
+        <h3 onclick="toggleInfoPanel()">
+            <span class="info-title">Map Information</span>
+            <span class="toggle" aria-hidden="true">▾</span>
+        </h3>
+        <div class="info-body">
+            <p>Search for a place, or click the map to drop a marker. Markers persist across restarts and can be exported or imported as GeoJSON.</p>
+            <div class="coordinates" id="coordinates">
+                Lat: 40.7128, Lng: -74.0060 · z11
+            </div>
+            <div class="route-info" id="routeInfo" hidden>
+                <strong>Route:</strong> <span id="routeDistance">0 km</span>
+                <span class="muted" id="routeStops"></span>
+            </div>
+            <div class="keyboard-hint">
+                <kbd>/</kbd> search · <kbd>M</kbd> marker mode · <kbd>Esc</kbd> clear selection
+            </div>
         </div>
     </div>
 
@@ -318,9 +409,14 @@
 
         const STORAGE_KEY_MARKERS = 'cartographer.markers.v1';
         const STORAGE_KEY_GEO_PREF = 'cartographer.geoOptIn.v1';
+        const STORAGE_KEY_PANEL = 'cartographer.infoPanel.collapsed';
+        const STORAGE_KEY_MARKER_MODE = 'cartographer.markerMode';
+        const BASE_TITLE = 'Cartographer';
 
         let myLocationMarker = null;
         let myLocationAccuracy = null;
+        let markerModeEnabled = true;
+        let lastPlaceName = null;
 
         const tileLayers = {
             osm: {
@@ -361,9 +457,88 @@
 
             map.on('click', onMapClick);
             map.on('mousemove', updateCoordinates);
+            map.on('zoomend', updateZoomIndicator);
+            updateZoomIndicator();
 
             setupSearch();
+            setupKeyboard();
+            restorePanelState();
+            restoreMarkerMode();
             restoreMarkers();
+        }
+
+        function updateZoomIndicator() {
+            const el = document.getElementById('coordinates');
+            if (!el) return;
+            const text = el.textContent.replace(/\s*·\s*z\d+$/i, '');
+            el.textContent = `${text} · z${map.getZoom()}`;
+        }
+
+        function toggleInfoPanel() {
+            const panel = document.getElementById('infoPanel');
+            panel.classList.toggle('collapsed');
+            try {
+                localStorage.setItem(STORAGE_KEY_PANEL, panel.classList.contains('collapsed') ? '1' : '0');
+            } catch (_) {}
+        }
+
+        function restorePanelState() {
+            try {
+                if (localStorage.getItem(STORAGE_KEY_PANEL) === '1') {
+                    document.getElementById('infoPanel').classList.add('collapsed');
+                }
+            } catch (_) {}
+        }
+
+        function setupKeyboard() {
+            document.addEventListener('keydown', (e) => {
+                const tag = (e.target && e.target.tagName) || '';
+                const typing = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable);
+
+                if (e.key === 'Escape') {
+                    closeSearchResults();
+                    map.closePopup();
+                    if (typing) e.target.blur();
+                    return;
+                }
+
+                if (typing) return;
+
+                if (e.key === '/') {
+                    e.preventDefault();
+                    const input = document.getElementById('searchInput');
+                    input.focus();
+                    input.select();
+                    return;
+                }
+
+                if (e.key === 'm' || e.key === 'M') {
+                    e.preventDefault();
+                    toggleMarkerMode();
+                }
+            });
+        }
+
+        function toggleMarkerMode() {
+            markerModeEnabled = !markerModeEnabled;
+            document.body.classList.toggle('marker-mode-off', !markerModeEnabled);
+            try { localStorage.setItem(STORAGE_KEY_MARKER_MODE, markerModeEnabled ? 'on' : 'off'); } catch (_) {}
+            showToast(`Marker mode ${markerModeEnabled ? 'on' : 'off'}`);
+        }
+
+        function restoreMarkerMode() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY_MARKER_MODE);
+                if (saved === 'off') {
+                    markerModeEnabled = false;
+                    document.body.classList.add('marker-mode-off');
+                }
+            } catch (_) {}
+        }
+
+        function setDocumentTitleFor(place) {
+            lastPlaceName = place || null;
+            document.title = place ? `${place} · ${BASE_TITLE}` : BASE_TITLE;
         }
 
         function restoreMarkers() {
@@ -630,6 +805,7 @@
             const record = addMarker(lat, lng, name);
             record.leaflet.openPopup();
 
+            setDocumentTitleFor(name);
             closeSearchResults();
             document.getElementById('searchInput').value = name;
         }
@@ -641,12 +817,13 @@
         }
 
         function onMapClick(e) {
+            if (!markerModeEnabled) return;
             addMarker(e.latlng.lat, e.latlng.lng, 'Custom Marker');
         }
 
         function updateCoordinates(e) {
-            document.getElementById('coordinates').textContent = 
-                `Lat: ${e.latlng.lat.toFixed(4)}, Lng: ${e.latlng.lng.toFixed(4)}`;
+            document.getElementById('coordinates').textContent =
+                `Lat: ${e.latlng.lat.toFixed(4)}, Lng: ${e.latlng.lng.toFixed(4)} · z${map.getZoom()}`;
         }
 
         function createTileLayer(style) {
