@@ -143,8 +143,9 @@
                 <select id="mapStyle" onchange="changeMapStyle(this.value)">
                     <option value="osm">OpenStreetMap</option>
                     <option value="topo">Topographic</option>
-                    <option value="dark">Dark Mode</option>
-                    <option value="watercolor">Watercolor</option>
+                    <option value="dark">Dark (CartoDB)</option>
+                    <option value="satellite">Satellite (ESRI)</option>
+                    <option value="watercolor">Watercolor (Stadia)</option>
                 </select>
             </div>
             <div class="control-group">
@@ -173,10 +174,32 @@
         let routeLine;
 
         const tileLayers = {
-            osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            topo: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-            dark: 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png',
-            watercolor: 'https://stamen-tiles-{s}.a.ssl.fastly.net/watercolor/{z}/{x}/{y}.jpg'
+            osm: {
+                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 19
+            },
+            topo: {
+                url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                attribution: 'Map data: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | Map style: © <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)',
+                maxZoom: 17
+            },
+            dark: {
+                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 20
+            },
+            satellite: {
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+                maxZoom: 19
+            },
+            watercolor: {
+                url: 'https://tiles.stadiamaps.com/tiles/stamen_watercolor/{z}/{x}/{y}.jpg',
+                attribution: '© <a href="https://stadiamaps.com/">Stadia Maps</a> © <a href="https://stamen.com/">Stamen Design</a> © <a href="https://openstreetmap.org/">OpenStreetMap</a> contributors',
+                maxZoom: 16
+            }
         };
 
         const locations = {
@@ -189,10 +212,7 @@
         function initMap() {
             map = L.map('map').setView([40.7128, -74.0060], 11);
 
-            currentTileLayer = L.tileLayer(tileLayers.osm, {
-                attribution: '© OpenStreetMap contributors',
-                maxZoom: 19
-            }).addTo(map);
+            currentTileLayer = createTileLayer('osm').addTo(map);
 
             map.on('click', onMapClick);
             map.on('mousemove', updateCoordinates);
@@ -226,15 +246,18 @@
                 .openPopup();
         }
 
+        function createTileLayer(style) {
+            const cfg = tileLayers[style];
+            const opts = { attribution: cfg.attribution, maxZoom: cfg.maxZoom };
+            if (cfg.subdomains) opts.subdomains = cfg.subdomains;
+            return L.tileLayer(cfg.url, opts);
+        }
+
         function changeMapStyle(style) {
             if (currentTileLayer) {
                 map.removeLayer(currentTileLayer);
             }
-            
-            currentTileLayer = L.tileLayer(tileLayers[style], {
-                attribution: '© OpenStreetMap contributors',
-                maxZoom: 19
-            }).addTo(map);
+            currentTileLayer = createTileLayer(style).addTo(map);
         }
 
         function addRandomMarker() {
