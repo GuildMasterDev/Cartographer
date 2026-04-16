@@ -7,10 +7,14 @@
     "start": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["electron", "openstreetmap", "maps"],
+  "keywords": [
+    "electron",
+    "openstreetmap",
+    "maps"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^32.0.0"
+    "electron": "^41.2.1"
   }
 }
