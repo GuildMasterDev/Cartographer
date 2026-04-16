@@ -198,6 +198,22 @@
             font-size: 12px;
         }
 
+        .route-info {
+            margin-top: 10px;
+            padding: 8px 10px;
+            background: #eef2ff;
+            border-left: 3px solid #667eea;
+            border-radius: 3px;
+            font-size: 13px;
+            color: #333;
+        }
+
+        .route-info .muted {
+            color: #888;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+
         .marker-popup {
             font-size: 14px;
         }
@@ -273,17 +289,22 @@
                 <button onclick="document.getElementById('importInput').click()">⬆️ Import</button>
                 <input id="importInput" type="file" accept=".geojson,application/geo+json,application/json" style="display:none" onchange="importMarkers(event)" />
                 <button onclick="drawRoute()">🛤️ Draw Route</button>
+                <button onclick="clearRoute()">🧹 Clear Route</button>
             </div>
         </div>
     </div>
 
     <div id="map"></div>
 
-    <div class="info-panel">
+    <div class="info-panel" id="infoPanel">
         <h3>Map Information</h3>
-        <p>Click on the map to place custom markers. Use the controls above to navigate to different cities or change the map style.</p>
+        <p>Search for a place, or click the map to drop a marker. Markers persist across restarts and can be exported or imported as GeoJSON.</p>
         <div class="coordinates" id="coordinates">
             Lat: 40.7128, Lng: -74.0060
+        </div>
+        <div class="route-info" id="routeInfo" hidden>
+            <strong>Route:</strong> <span id="routeDistance">0 km</span>
+            <span class="muted" id="routeStops"></span>
         </div>
     </div>
 
@@ -292,6 +313,7 @@
         let map;
         let markers = [];
         let currentTileLayer;
+        let currentStyle = 'osm';
         let routeLine;
 
         const STORAGE_KEY_MARKERS = 'cartographer.markers.v1';
@@ -638,16 +660,28 @@
             if (currentTileLayer) {
                 map.removeLayer(currentTileLayer);
             }
+            currentStyle = style;
             currentTileLayer = createTileLayer(style).addTo(map);
+            if (routeLine) {
+                routeLine.setStyle({ color: routeColorForStyle(currentStyle) });
+            }
+        }
+
+        function routeColorForStyle(style) {
+            const colors = {
+                osm: '#d93025',
+                topo: '#1a237e',
+                dark: '#ffeb3b',
+                satellite: '#ffeb3b',
+                watercolor: '#4a148c'
+            };
+            return colors[style] || '#d93025';
         }
 
         function clearMarkers() {
             markers.forEach((m) => map.removeLayer(m.leaflet));
             markers = [];
-            if (routeLine) {
-                map.removeLayer(routeLine);
-                routeLine = null;
-            }
+            clearRoute();
             saveMarkers();
         }
 
@@ -739,32 +773,59 @@
         }
 
         function drawRoute() {
-            if (routeLine) {
-                map.removeLayer(routeLine);
+            if (markers.length < 2) {
+                showToast('Need at least 2 markers to draw a route');
+                return;
             }
 
-            const points = [
-                [40.7128, -74.0060],
-                [40.7580, -73.9855],
-                [40.7489, -73.9680],
-                [40.7614, -73.9776]
-            ];
+            if (routeLine) map.removeLayer(routeLine);
 
+            const points = markers.map((m) => [m.lat, m.lng]);
             routeLine = L.polyline(points, {
-                color: '#667eea',
+                color: routeColorForStyle(currentStyle),
                 weight: 5,
-                opacity: 0.7,
+                opacity: 0.85,
                 smoothFactor: 1
             }).addTo(map);
 
-            points.forEach((point, index) => {
-                L.marker(point)
-                    .addTo(map)
-                    .bindPopup(`<div class="marker-popup"><h4>Route Point ${index + 1}</h4><p>Latitude: ${point[0]}</p><p>Longitude: ${point[1]}</p></div>`);
-                markers.push(L.marker(point));
-            });
+            const totalMeters = totalRouteDistance(points);
+            showRouteInfo(points.length, totalMeters);
+            map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+        }
 
-            map.fitBounds(routeLine.getBounds());
+        function clearRoute() {
+            if (routeLine) {
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }
+            hideRouteInfo();
+        }
+
+        function totalRouteDistance(points) {
+            let total = 0;
+            for (let i = 1; i < points.length; i += 1) {
+                total += L.latLng(points[i - 1]).distanceTo(L.latLng(points[i]));
+            }
+            return total;
+        }
+
+        function showRouteInfo(stops, meters) {
+            const panel = document.getElementById('routeInfo');
+            if (!panel) return;
+            document.getElementById('routeDistance').textContent = formatDistance(meters);
+            document.getElementById('routeStops').textContent = `· ${stops} stops`;
+            panel.hidden = false;
+        }
+
+        function hideRouteInfo() {
+            const panel = document.getElementById('routeInfo');
+            if (panel) panel.hidden = true;
+        }
+
+        function formatDistance(meters) {
+            if (meters < 1000) return `${Math.round(meters)} m`;
+            if (meters < 100000) return `${(meters / 1000).toFixed(2)} km`;
+            return `${Math.round(meters / 1000).toLocaleString()} km`;
         }
 
         window.onload = initMap;
