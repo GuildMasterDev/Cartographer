@@ -211,6 +211,38 @@
             color: #666;
             margin: 3px 0;
         }
+
+        .marker-popup .popup-delete {
+            color: #c0392b;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .marker-popup .popup-delete:hover {
+            text-decoration: underline;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(30, 30, 40, 0.92);
+            color: white;
+            padding: 10px 18px;
+            border-radius: 6px;
+            font-size: 14px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            z-index: 3000;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+        }
+
+        .toast.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
     </style>
 </head>
 <body>
@@ -235,8 +267,10 @@
                 </select>
             </div>
             <div class="control-group">
-                <button onclick="addRandomMarker()">📌 Add Marker</button>
                 <button onclick="clearMarkers()">🗑️ Clear Markers</button>
+                <button onclick="exportMarkers()">⬇️ Export</button>
+                <button onclick="document.getElementById('importInput').click()">⬆️ Import</button>
+                <input id="importInput" type="file" accept=".geojson,application/geo+json,application/json" style="display:none" onchange="importMarkers(event)" />
                 <button onclick="drawRoute()">🛤️ Draw Route</button>
             </div>
         </div>
@@ -258,6 +292,8 @@
         let markers = [];
         let currentTileLayer;
         let routeLine;
+
+        const STORAGE_KEY_MARKERS = 'cartographer.markers.v1';
 
         const tileLayers = {
             osm: {
@@ -300,11 +336,110 @@
             map.on('mousemove', updateCoordinates);
 
             setupSearch();
+            restoreMarkers();
+        }
 
-            L.marker([40.7128, -74.0060])
-                .addTo(map)
-                .bindPopup('<div class="marker-popup"><h4>Welcome to Cartographer!</h4><p>Search for a place above, or click the map to drop a marker.</p></div>')
-                .openPopup();
+        function restoreMarkers() {
+            const stored = loadStoredMarkers();
+            if (!stored.length) {
+                const welcome = L.marker([40.7128, -74.0060])
+                    .addTo(map)
+                    .bindPopup('<div class="marker-popup"><h4>Welcome to Cartographer!</h4><p>Search for a place above, or click the map to drop a marker.</p></div>');
+                welcome._welcome = true;
+                welcome.openPopup();
+                return;
+            }
+            stored.forEach((entry) => hydrateMarker(entry));
+            const bounds = L.latLngBounds(stored.map((e) => [e.lat, e.lng]));
+            if (stored.length === 1) {
+                map.setView([stored[0].lat, stored[0].lng], 12);
+            } else {
+                map.fitBounds(bounds, { padding: [40, 40] });
+            }
+        }
+
+        function loadStoredMarkers() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY_MARKERS);
+                if (!raw) return [];
+                const parsed = JSON.parse(raw);
+                return Array.isArray(parsed) ? parsed.filter(isValidMarkerEntry) : [];
+            } catch (err) {
+                console.warn('Could not read stored markers', err);
+                return [];
+            }
+        }
+
+        function isValidMarkerEntry(e) {
+            return e && typeof e.lat === 'number' && typeof e.lng === 'number' &&
+                   isFinite(e.lat) && isFinite(e.lng);
+        }
+
+        function saveMarkers() {
+            const payload = markers.map(({ id, lat, lng, name, timestamp }) => ({
+                id, lat, lng, name, timestamp
+            }));
+            try {
+                localStorage.setItem(STORAGE_KEY_MARKERS, JSON.stringify(payload));
+            } catch (err) {
+                console.warn('Could not persist markers', err);
+            }
+        }
+
+        function newMarkerId() {
+            return 'm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+        }
+
+        function hydrateMarker(entry) {
+            const id = entry.id || newMarkerId();
+            const timestamp = entry.timestamp || new Date().toISOString();
+            const name = entry.name || 'Custom Marker';
+            const leaflet = L.marker([entry.lat, entry.lng]).addTo(map);
+            const record = { id, lat: entry.lat, lng: entry.lng, name, timestamp, leaflet };
+            leaflet.bindPopup(() => buildPopupHtml(record));
+            markers.push(record);
+            return record;
+        }
+
+        function addMarker(lat, lng, name) {
+            const entry = {
+                id: newMarkerId(),
+                lat: Number(lat),
+                lng: Number(lng),
+                name: name || 'Custom Marker',
+                timestamp: new Date().toISOString()
+            };
+            const record = hydrateMarker(entry);
+            saveMarkers();
+            return record;
+        }
+
+        function buildPopupHtml(record) {
+            const when = formatTimestamp(record.timestamp);
+            return `<div class="marker-popup">
+                <h4>${escapeHtml(record.name || 'Custom Marker')}</h4>
+                <p>Lat: ${record.lat.toFixed(5)}, Lng: ${record.lng.toFixed(5)}</p>
+                <p>Added: ${escapeHtml(when)}</p>
+                <p><a href="#" class="popup-delete" onclick="event.preventDefault(); deleteMarker('${record.id}')">Delete</a></p>
+            </div>`;
+        }
+
+        function formatTimestamp(iso) {
+            try {
+                const d = new Date(iso);
+                if (isNaN(d.getTime())) return iso;
+                return d.toLocaleString();
+            } catch (_) {
+                return iso;
+            }
+        }
+
+        function deleteMarker(id) {
+            const idx = markers.findIndex((m) => m.id === id);
+            if (idx === -1) return;
+            const [removed] = markers.splice(idx, 1);
+            map.removeLayer(removed.leaflet);
+            saveMarkers();
         }
 
         function setupSearch() {
@@ -411,12 +546,8 @@
             const name = shortName(item);
 
             map.flyTo([lat, lng], 13, { duration: 1.0 });
-
-            const marker = L.marker([lat, lng])
-                .addTo(map)
-                .bindPopup(`<div class="marker-popup"><h4>${escapeHtml(name)}</h4><p>${escapeHtml(item.display_name)}</p><p>Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}</p></div>`)
-                .openPopup();
-            markers.push(marker);
+            const record = addMarker(lat, lng, name);
+            record.leaflet.openPopup();
 
             closeSearchResults();
             document.getElementById('searchInput').value = name;
@@ -429,11 +560,7 @@
         }
 
         function onMapClick(e) {
-            const marker = L.marker(e.latlng)
-                .addTo(map)
-                .bindPopup(`<div class="marker-popup"><h4>Custom Marker</h4><p>Latitude: ${e.latlng.lat.toFixed(4)}</p><p>Longitude: ${e.latlng.lng.toFixed(4)}</p></div>`);
-            
-            markers.push(marker);
+            addMarker(e.latlng.lat, e.latlng.lng, 'Custom Marker');
         }
 
         function updateCoordinates(e) {
@@ -455,25 +582,101 @@
             currentTileLayer = createTileLayer(style).addTo(map);
         }
 
-        function addRandomMarker() {
-            const bounds = map.getBounds();
-            const lat = bounds.getSouth() + (bounds.getNorth() - bounds.getSouth()) * Math.random();
-            const lng = bounds.getWest() + (bounds.getEast() - bounds.getWest()) * Math.random();
-            
-            const marker = L.marker([lat, lng])
-                .addTo(map)
-                .bindPopup(`<div class="marker-popup"><h4>Random Marker</h4><p>Latitude: ${lat.toFixed(4)}</p><p>Longitude: ${lng.toFixed(4)}</p></div>`);
-            
-            markers.push(marker);
-        }
-
         function clearMarkers() {
-            markers.forEach(marker => map.removeLayer(marker));
+            markers.forEach((m) => map.removeLayer(m.leaflet));
             markers = [];
             if (routeLine) {
                 map.removeLayer(routeLine);
                 routeLine = null;
             }
+            saveMarkers();
+        }
+
+        function exportMarkers() {
+            if (!markers.length) {
+                showToast('No markers to export');
+                return;
+            }
+            const fc = {
+                type: 'FeatureCollection',
+                features: markers.map((m) => ({
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: [m.lng, m.lat] },
+                    properties: {
+                        name: m.name || 'Custom Marker',
+                        timestamp: m.timestamp || new Date().toISOString()
+                    }
+                }))
+            };
+            const blob = new Blob([JSON.stringify(fc, null, 2)], { type: 'application/geo+json' });
+            const url = URL.createObjectURL(blob);
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `cartographer-markers-${stamp}.geojson`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        function importMarkers(event) {
+            const file = event.target.files && event.target.files[0];
+            event.target.value = '';
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const data = JSON.parse(reader.result);
+                    const features = extractFeatures(data);
+                    if (!features.length) {
+                        showToast('No point features found in file');
+                        return;
+                    }
+                    let added = 0;
+                    features.forEach((f) => {
+                        if (!f.geometry || f.geometry.type !== 'Point') return;
+                        const [lng, lat] = f.geometry.coordinates || [];
+                        if (typeof lat !== 'number' || typeof lng !== 'number') return;
+                        const props = f.properties || {};
+                        addMarker(lat, lng, props.name || 'Imported Marker');
+                        added += 1;
+                    });
+                    if (added && markers.length) {
+                        const bounds = L.latLngBounds(markers.map((m) => [m.lat, m.lng]));
+                        map.fitBounds(bounds, { padding: [40, 40] });
+                    }
+                    showToast(`Imported ${added} marker${added === 1 ? '' : 's'}`);
+                } catch (err) {
+                    console.error('Import failed', err);
+                    showToast('Import failed — file is not valid GeoJSON');
+                }
+            };
+            reader.onerror = () => showToast('Could not read file');
+            reader.readAsText(file);
+        }
+
+        function extractFeatures(data) {
+            if (!data) return [];
+            if (data.type === 'FeatureCollection' && Array.isArray(data.features)) return data.features;
+            if (data.type === 'Feature') return [data];
+            if (Array.isArray(data)) return data;
+            return [];
+        }
+
+        function showToast(message) {
+            let toast = document.getElementById('toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast';
+                toast.className = 'toast';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.classList.add('visible');
+            clearTimeout(showToast._t);
+            showToast._t = setTimeout(() => toast.classList.remove('visible'), 2400);
         }
 
         function drawRoute() {
