@@ -267,6 +267,7 @@
                 </select>
             </div>
             <div class="control-group">
+                <button onclick="requestMyLocation()">📍 My Location</button>
                 <button onclick="clearMarkers()">🗑️ Clear Markers</button>
                 <button onclick="exportMarkers()">⬇️ Export</button>
                 <button onclick="document.getElementById('importInput').click()">⬆️ Import</button>
@@ -294,6 +295,10 @@
         let routeLine;
 
         const STORAGE_KEY_MARKERS = 'cartographer.markers.v1';
+        const STORAGE_KEY_GEO_PREF = 'cartographer.geoOptIn.v1';
+
+        let myLocationMarker = null;
+        let myLocationAccuracy = null;
 
         const tileLayers = {
             osm: {
@@ -440,6 +445,60 @@
             const [removed] = markers.splice(idx, 1);
             map.removeLayer(removed.leaflet);
             saveMarkers();
+        }
+
+        function requestMyLocation() {
+            if (!('geolocation' in navigator)) {
+                showToast('Geolocation is not available in this browser');
+                return;
+            }
+            showToast('Requesting location...');
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    try { localStorage.setItem(STORAGE_KEY_GEO_PREF, 'granted'); } catch (_) {}
+                    showMyLocation(position);
+                },
+                (error) => {
+                    try { localStorage.setItem(STORAGE_KEY_GEO_PREF, 'denied'); } catch (_) {}
+                    const msg = error && error.code === 1
+                        ? 'Location access denied — search for your city instead'
+                        : 'Could not determine your location';
+                    showToast(msg);
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+            );
+        }
+
+        function showMyLocation(position) {
+            const { latitude, longitude, accuracy } = position.coords;
+
+            if (myLocationMarker) map.removeLayer(myLocationMarker);
+            if (myLocationAccuracy) map.removeLayer(myLocationAccuracy);
+
+            myLocationAccuracy = L.circle([latitude, longitude], {
+                radius: accuracy || 50,
+                color: '#1976d2',
+                fillColor: '#1976d2',
+                fillOpacity: 0.12,
+                weight: 1
+            }).addTo(map);
+
+            myLocationMarker = L.circleMarker([latitude, longitude], {
+                radius: 9,
+                color: '#ffffff',
+                weight: 3,
+                fillColor: '#1976d2',
+                fillOpacity: 1
+            }).addTo(map);
+
+            myLocationMarker.bindPopup(
+                `<div class="marker-popup"><h4>You are here</h4>` +
+                `<p>Lat: ${latitude.toFixed(5)}, Lng: ${longitude.toFixed(5)}</p>` +
+                `<p>Accuracy: ±${Math.round(accuracy || 0)} m</p></div>`
+            );
+
+            map.flyTo([latitude, longitude], 14, { duration: 1.0 });
+            myLocationMarker.openPopup();
         }
 
         function setupSearch() {
